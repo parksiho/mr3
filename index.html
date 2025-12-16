@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <title>Mango Run 3D - Optimized</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #87CEEB;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; /* 모바일 터치 제스처 방지 */
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #game-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        #score-board {
+            position: absolute;
+            top: 0;
+            right: 0;
+            padding: 20px;
+            font-size: 2rem;
+            font-weight: bold;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            font-family: 'Courier New', Courier, monospace;
+            transition: transform 0.2s, color 0.2s;
+        }
+
+        #speed-display {
+            position: absolute;
+            top: 0;
+            left: 0;
+            padding: 20px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        #combo-display {
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #FFEB3B;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            font-family: 'Verdana', sans-serif;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .score-bonus {
+            color: #FFD700 !important;
+            transform: scale(1.3);
+        }
+
+        #start-screen, #game-over-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            z-index: 10;
+            backdrop-filter: blur(3px);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        h1 {
+            color: #FFD700;
+            font-size: 3rem;
+            margin-bottom: 10px;
+            text-shadow: 3px 3px 0 #5d4037;
+            text-align: center;
+            font-family: 'Verdana', sans-serif;
+        }
+
+        p {
+            color: #fff;
+            font-size: 1.2rem;
+            margin-bottom: 30px;
+            text-align: center;
+            text-shadow: 1px 1px 2px black;
+            line-height: 1.5;
+        }
+
+        button {
+            background-color: #7CB342;
+            color: white;
+            border: 3px solid #fff;
+            padding: 15px 40px;
+            font-size: 1.5rem;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            transition: transform 0.1s, background-color 0.2s;
+            font-weight: bold;
+        }
+
+        button:active {
+            transform: scale(0.95);
+            background-color: #558B2F;
+        }
+
+        .controls-hint {
+            margin-top: 20px;
+            font-size: 0.9rem;
+            color: #eee;
+            background: rgba(0,0,0,0.5);
+            padding: 10px 20px;
+            border-radius: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container"></div>
+
+    <div id="ui-layer">
+        <div id="speed-display">SPEED: <span id="speed-val">0</span> km/h</div>
+        <div id="score-board">SCORE: <span id="score">0</span></div>
+        <div id="combo-display">COMBO!</div>
+    </div>
+
+    <!-- 시작 화면 -->
+    <div id="start-screen">
+        <h1>Mango Run 3D</h1>
+        <p>최적화된 모바일 환경에서 달려보세요!<br>점프도 가능하지만 장애물은 못 피해요!</p>
+        <button id="start-btn">GAME START</button>
+        <div class="controls-hint">
+            PC: ← → 이동, SPACE 점프 | Mobile: 스와이프
+        </div>
+    </div>
+
+    <!-- 게임 오버 화면 -->
+    <div id="game-over-screen" class="hidden">
+        <h1>GAME OVER</h1>
+        <p>최종 점수: <span id="final-score">0</span></p>
+        <button id="restart-btn">TRY AGAIN</button>
+    </div>
+
+    <!-- Three.js 라이브러리 로드 -->
+    <script type="module">
+        import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js';
+
+        const config = {
+            laneWidth: 3, 
+            lanes: [-3, 0, 3], 
+            baseSpeed: 15, 
+            maxSpeed: 45,
+            obstacleSpawnRate: 1.5,
+            scenerySpawnRate: 0.3,
+            itemSpawnRate: 2.0,
+            dayDuration: 60,
+            jumpStrength: 15,
+            gravity: -40,
+            comboResetTime: 3.0 
+        };
+
+        // 쉐이더용 전역 유니폼 변수
+        const bendUniforms = {
+            uCurve: { value: new THREE.Vector2(0, 0) }
+        };
+
+        // [최적화] 전역 지오메트리 및 머티리얼 저장소
+        const Assets = {
+            geos: {},
+            mats: {},
+            textures: {}
+        };
+
+        let scene, camera, renderer;
+        let mango; 
+        let obstacles = [];
+        let items = []; 
+        let scenery = []; 
+        let birds = []; 
+        let stars; 
+        let roadMesh, grassMesh; 
+        let ambientLight, dirLight;
+
+        let gameActive = false;
+        let score = 0;
+        let speed = config.baseSpeed;
+        let currentLane = 1; 
+        let targetX = 0;
+        let lastTime = 0;
+        
+        let spawnTimer = 0;
+        let sceneryTimer = 0;
+        let itemSpawnTimer = 0; 
+        let birdSpawnTimer = 0; 
+        let cycleTimer = 0; 
+        let curveTimer = 0;
+        
+        let combo = 0;
+        let comboTimer = 0;
+        
+        let touchStartX = 0;
+        let touchStartY = 0;
+
+        let isJumping = false;
+        let jumpVelocity = 0;
+
+        const scoreEl = document.getElementById('score');
+        const scoreBoard = document.getElementById('score-board'); 
+        const comboEl = document.getElementById('combo-display');
+        const speedValEl = document.getElementById('speed-val');
+        const finalScoreEl = document.getElementById('final-score');
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const startBtn = document.getElementById('start-btn');
+        const restartBtn = document.getElementById('restart-btn');
+
+        // 커브 쉐이더 적용 함수
+        function applyBend(material) {
+            material.onBeforeCompile = (shader) => {
+                shader.uniforms.uCurve = bendUniforms.uCurve;
+                shader.vertexShader = shader.vertexShader.replace(
+                    '#include <common>',
+                    `#include <common>
+                    uniform vec2 uCurve;`
+                );
+                shader.vertexShader = shader.vertexShader.replace(
+                    '#include <project_vertex>',
+                    `vec4 mvPosition = vec4( transformed, 1.0 );
+                    #ifdef USE_INSTANCING
+                        mvPosition = instanceMatrix * mvPosition;
+                    #endif
+                    vec4 bentWorldPosition = modelMatrix * mvPosition;
+                    float zDist = bentWorldPosition.z - cameraPosition.z;
+                    float bend = uCurve.x * zDist * zDist * 0.0001; 
+                    bentWorldPosition.x += bend;
+                    mvPosition = viewMatrix * bentWorldPosition;
+                    gl_Position = projectionMatrix * mvPosition;`
+                );
+            };
+        }
+
+        // [최적화] 리소스 미리 생성 함수
+        function preloadAssets() {
+            // Geometries
+            Assets.geos.box = new THREE.BoxGeometry(1, 1, 1);
+            Assets.geos.sphere = new THREE.SphereGeometry(1, 8, 8);
+            Assets.geos.cone = new THREE.ConeGeometry(1, 1, 8);
+            Assets.geos.cylinder = new THREE.CylinderGeometry(1, 1, 1, 6);
+            Assets.geos.dodeca = new THREE.DodecahedronGeometry(1);
+            
+            // Materials (Colors)
+            const colors = {
+                yellow: 0xFDD835, brown: 0x8D6E63, orange: 0xFF9800, white: 0xFFFFFF, 
+                black: 0x333333, green: 0x33691E, lightGreen: 0x4CAF50, darkGreen: 0x2E7D32,
+                grey: 0x757575, pink: 0xFF4081, sky: 0x87CEEB
+            };
+
+            for (const [key, val] of Object.entries(colors)) {
+                const mat = new THREE.MeshStandardMaterial({ color: val });
+                applyBend(mat); // 미리 쉐이더 적용
+                Assets.mats[key] = mat;
+            }
+
+            // Textures for Bubbles
+            Assets.textures.bubbleNormal = createBubbleTexture(false);
+            Assets.textures.bubbleHappy = createBubbleTexture(true);
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); 
+            scene.fog = new THREE.Fog(0x87CEEB, 30, 160); 
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 300); 
+            camera.position.set(0, 5, 8); 
+            camera.lookAt(0, 1, -5); 
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); // antialias 켬 (모바일에서 픽셀비 조절로 커버)
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            // [최적화] 모바일에서 성능을 위해 픽셀 비율 제한 (최대 2배)
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true; 
+            // [최적화] 그림자 맵 타입 변경 (조금 더 가벼움)
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+            document.getElementById('game-container').appendChild(renderer.domElement);
+
+            ambientLight = new THREE.AmbientLight(0xffffff, 0.6); 
+            scene.add(ambientLight);
+
+            dirLight = new THREE.DirectionalLight(0xffffff, 0.9); 
+            dirLight.position.set(20, 40, 20);
+            dirLight.castShadow = true;
+            // [최적화] 그림자 맵 크기 축소 (모바일 부하 감소)
+            dirLight.shadow.mapSize.width = 512; 
+            dirLight.shadow.mapSize.height = 512;
+            dirLight.shadow.camera.left = -50;
+            dirLight.shadow.camera.right = 50;
+            scene.add(dirLight);
+
+            // 리소스 로드
+            preloadAssets();
+
+            createEnvironment();
+            createStars(); 
+            createMango();
+
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('keydown', handleKeyDown);
+            
+            document.addEventListener('touchstart', (e) => {
+                touchStartX = e.changedTouches[0].screenX;
+                touchStartY = e.changedTouches[0].screenY;
+            }, {passive: false});
+            
+            document.addEventListener('touchend', (e) => {
+                const touchEndX = e.changedTouches[0].screenX;
+                const touchEndY = e.changedTouches[0].screenY;
+                handleSwipe(touchEndX, touchEndY);
+            }, {passive: false});
+
+            startBtn.addEventListener('click', startGame);
+            restartBtn.addEventListener('click', resetGame);
+            startBtn.addEventListener('touchend', (e) => { e.preventDefault(); startGame(); });
+            restartBtn.addEventListener('touchend', (e) => { e.preventDefault(); resetGame(); });
+
+            requestAnimationFrame(animate);
+        }
+
+        // --- 재사용성을 높인 생성 함수들 ---
+
+        function createStars() {
+            const starGeo = new THREE.BufferGeometry();
+            const starCount = 600; // [최적화] 별 개수 약간 감소
+            const positions = [];
+            const sizes = [];
+            const shifts = []; 
+
+            for(let i=0; i<starCount; i++) {
+                positions.push((Math.random() - 0.5) * 500);
+                positions.push(Math.random() * 200 + 40); 
+                positions.push((Math.random() - 0.5) * 500 - 50);
+                sizes.push(Math.random() * 1.5 + 0.5); 
+                shifts.push(Math.random() * Math.PI * 2); 
+            }
+            
+            starGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            starGeo.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
+            starGeo.setAttribute('shift', new THREE.Float32BufferAttribute(shifts, 1));
+            
+            const starMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uOpacity: { value: 0 }, 
+                    color: { value: new THREE.Color(0xFFFFFF) }
+                },
+                vertexShader: `
+                    uniform float uTime;
+                    attribute float size;
+                    attribute float shift;
+                    void main() {
+                        vec3 pos = position;
+                        float twinkle = sin(uTime * 3.0 + shift); 
+                        float scale = 0.6 + 0.4 * twinkle; 
+                        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+                        gl_Position = projectionMatrix * mvPosition;
+                        gl_PointSize = size * scale * (300.0 / -mvPosition.z);
+                    }
+                `,
+                fragmentShader: `
+                    uniform vec3 color;
+                    uniform float uOpacity;
+                    void main() {
+                        if (uOpacity <= 0.01) discard;
+                        vec2 coord = gl_PointCoord - vec2(0.5);
+                        if(length(coord) > 0.5) discard;
+                        float strength = 1.0 - (length(coord) * 2.0);
+                        strength = pow(strength, 2.0);
+                        gl_FragColor = vec4(color, uOpacity * strength);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+            
+            stars = new THREE.Points(starGeo, starMat);
+            scene.add(stars);
+        }
+
+        function createEnvironment() {
+            // [최적화] Plane 세그먼트 축소 (커브용으로 적당히 유지)
+            const grassGeo = new THREE.PlaneGeometry(200, 300, 10, 10); 
+            const grassMat = Assets.mats.lightGreen; // 재사용
+
+            grassMesh = new THREE.Mesh(grassGeo, grassMat);
+            grassMesh.rotation.x = -Math.PI / 2;
+            grassMesh.position.z = -50;
+            grassMesh.position.y = -0.1;
+            grassMesh.receiveShadow = true;
+            scene.add(grassMesh);
+
+            const roadWidth = 12;
+            const roadGeo = new THREE.PlaneGeometry(roadWidth, 300, 4, 30); 
+            
+            // 텍스처는 한 번만 생성되므로 유지
+            const canvas = document.createElement('canvas');
+            canvas.width = 256; // [최적화] 캔버스 크기 축소
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.fillStyle = '#8D6E63'; 
+            ctx.fillRect(0, 0, 256, 256);
+            // 노이즈 감소
+            for(let i=0; i<1000; i++) {
+                ctx.fillStyle = `rgba(0,0,0,${Math.random() * 0.1})`;
+                ctx.fillRect(Math.random()*256, Math.random()*256, 2, 2);
+            }
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(5, 0, 5, 256);
+            ctx.fillRect(246, 0, 5, 256);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            const dashWidth = 4; const dashHeight = 20; const gap = 20;
+            for(let y=0; y<256; y+= (dashHeight + gap)) {
+                ctx.fillRect(256 * 0.33, y, dashWidth, dashHeight);
+                ctx.fillRect(256 * 0.66, y, dashWidth, dashHeight);
+            }
+
+            const roadTexture = new THREE.CanvasTexture(canvas);
+            roadTexture.wrapS = THREE.RepeatWrapping;
+            roadTexture.wrapT = THREE.RepeatWrapping;
+            roadTexture.repeat.set(1, 10);
+            
+            const roadMat = new THREE.MeshStandardMaterial({ map: roadTexture, roughness: 0.8 });
+            applyBend(roadMat); 
+
+            roadMesh = new THREE.Mesh(roadGeo, roadMat);
+            roadMesh.rotation.x = -Math.PI / 2;
+            roadMesh.position.z = -50;
+            roadMesh.receiveShadow = true;
+            roadMesh.userData = { texture: roadTexture };
+            scene.add(roadMesh);
+        }
+
+        // [최적화] 전역 지오메트리 사용으로 생성 부하 감소
+        function createTree() {
+            const tree = new THREE.Group();
+            const type = Math.floor(Math.random() * 3);
+            
+            const trunkHeight = type === 2 ? 4 : 3; 
+            const trunk = new THREE.Mesh(Assets.geos.cylinder, Assets.mats.brown);
+            trunk.scale.set(0.5, trunkHeight, 0.7); // 스케일로 크기 조정
+            trunk.position.y = trunkHeight / 2; 
+            trunk.castShadow = true; 
+            tree.add(trunk);
+
+            const mat = type === 0 ? Assets.mats.green : (type === 1 ? Assets.mats.lightGreen : Assets.mats.darkGreen);
+
+            if (type === 0) {
+                // 기본
+                const bCone = new THREE.Mesh(Assets.geos.cone, mat);
+                bCone.scale.set(2.5, 4, 2.5);
+                bCone.position.y = trunkHeight + 1.5; bCone.castShadow = true; tree.add(bCone);
+                
+                const tCone = new THREE.Mesh(Assets.geos.cone, mat);
+                tCone.scale.set(2, 3, 2);
+                tCone.position.y = trunkHeight + 3.5; tCone.castShadow = true; tree.add(tCone);
+            } else if (type === 1) {
+                // 둥근
+                const foliage = new THREE.Mesh(Assets.geos.dodeca, mat);
+                foliage.scale.set(2.5, 2.5, 2.5);
+                foliage.position.y = trunkHeight + 2; foliage.castShadow = true; tree.add(foliage);
+            } else {
+                // 뾰족
+                const yStart = trunkHeight + 1;
+                const s1 = new THREE.Mesh(Assets.geos.cone, mat); s1.scale.set(2.2, 2.5, 2.2); s1.position.y = yStart; s1.castShadow = true; tree.add(s1);
+                const s2 = new THREE.Mesh(Assets.geos.cone, mat); s2.scale.set(1.8, 2.5, 1.8); s2.position.y = yStart+1.5; s2.castShadow = true; tree.add(s2);
+                const s3 = new THREE.Mesh(Assets.geos.cone, mat); s3.scale.set(1.2, 2.5, 1.2); s3.position.y = yStart+3.0; s3.castShadow = true; tree.add(s3);
+            }
+            return tree;
+        }
+
+        function createRock() {
+            const rock = new THREE.Mesh(Assets.geos.dodeca, Assets.mats.grey);
+            rock.scale.set(0.8, 0.8, 0.8);
+            rock.scale.multiplyScalar(1 + Math.random() * 0.5);
+            rock.castShadow = true;
+            return rock;
+        }
+
+        function createFlower() {
+            const flowerGroup = new THREE.Group();
+            
+            const stem = new THREE.Mesh(Assets.geos.cylinder, Assets.mats.lightGreen);
+            stem.scale.set(0.05, 0.8, 0.05);
+            stem.position.y = 0.4;
+            stem.castShadow = true;
+            flowerGroup.add(stem);
+
+            const colors = [Assets.mats.yellow, Assets.mats.pink, Assets.mats.white];
+            const mat = colors[Math.floor(Math.random() * colors.length)];
+            
+            const head = new THREE.Mesh(Assets.geos.dodeca, mat);
+            head.scale.set(0.25, 0.25, 0.25);
+            head.position.y = 0.8;
+            head.castShadow = true;
+            flowerGroup.add(head);
+
+            const scale = 0.8 + Math.random() * 0.5;
+            flowerGroup.scale.set(scale, scale, scale);
+            return flowerGroup;
+        }
+
+        function createZooAnimal() {
+            const type = Math.random();
+            const group = new THREE.Group();
+            
+            const mY = Assets.mats.yellow;
+            const mB = Assets.mats.brown;
+            const mO = Assets.mats.orange;
+            const mW = Assets.mats.white;
+            const mK = Assets.mats.black;
+
+            // [최적화] 단순 박스 지오메트리 재사용
+            const box = Assets.geos.box; 
+            const sphere = Assets.geos.sphere;
+
+            if (type < 0.25) { // 기린
+                // 다리 4개
+                for(let x=-1; x<=1; x+=2) { 
+                    for(let z=-1; z<=1; z+=2) { 
+                        const leg = new THREE.Mesh(box, mY); 
+                        leg.scale.set(0.2, 3, 0.2); 
+                        leg.position.set(x*0.4, 1.5, z*0.4); 
+                        leg.castShadow = true; group.add(leg); 
+                    } 
+                }
+                const body = new THREE.Mesh(box, mY); body.scale.set(1.2, 1.2, 1.5); body.position.y = 3.6; body.rotation.x = -0.2; body.castShadow = true; group.add(body);
+                const neck = new THREE.Mesh(box, mY); neck.scale.set(0.3, 3, 0.3); neck.position.set(0, 5.5, 0.6); neck.rotation.x = 0.2; neck.castShadow = true; group.add(neck);
+                const head = new THREE.Mesh(box, mY); head.scale.set(0.5, 0.6, 0.8); head.position.set(0, 7.2, 0.9); head.castShadow = true; group.add(head);
+            } else if (type < 0.5) { // 사자
+                 for(let x=-1; x<=1; x+=2) { for(let z=-1; z<=1; z+=2) { const leg = new THREE.Mesh(box, mY); leg.scale.set(0.3, 1.2, 0.3); leg.position.set(x*0.35, 0.6, z*0.5); leg.castShadow = true; group.add(leg); } }
+                const body = new THREE.Mesh(box, mY); body.scale.set(1.0, 1.0, 1.8); body.position.y = 1.6; body.castShadow = true; group.add(body);
+                const mane = new THREE.Mesh(box, mB); mane.scale.set(1.2, 1.2, 0.4); mane.position.set(0, 2.0, 1.0); group.add(mane);
+                const head = new THREE.Mesh(box, mY); head.scale.set(0.8, 0.8, 0.8); head.position.set(0, 2.0, 1.3); group.add(head);
+            } else if (type < 0.75) { // 토끼
+                const body = new THREE.Mesh(sphere, mW); body.scale.set(0.5, 0.5, 0.5); body.position.y = 0.5; body.castShadow = true; group.add(body);
+                const head = new THREE.Mesh(sphere, mW); head.scale.set(0.35, 0.35, 0.35); head.position.set(0, 0.9, 0.3); group.add(head);
+                const ear1 = new THREE.Mesh(box, mW); ear1.scale.set(0.1, 0.6, 0.1); ear1.position.set(0.15, 1.4, 0.3); group.add(ear1);
+                const ear2 = new THREE.Mesh(box, mW); ear2.scale.set(0.1, 0.6, 0.1); ear2.position.set(-0.15, 1.4, 0.3); group.add(ear2);
+            } else { // 호랑이
+                 for(let x=-1; x<=1; x+=2) { for(let z=-1; z<=1; z+=2) { const leg = new THREE.Mesh(box, mO); leg.scale.set(0.3, 1.2, 0.3); leg.position.set(x*0.35, 0.6, z*0.5); leg.castShadow = true; group.add(leg); } }
+                const body = new THREE.Mesh(box, mO); body.scale.set(1.0, 1.0, 1.8); body.position.y = 1.6; body.castShadow = true; group.add(body);
+                const head = new THREE.Mesh(box, mO); head.scale.set(0.8, 0.8, 0.8); head.position.set(0, 2.0, 1.2); group.add(head);
+            }
+            return group;
+        }
+
+        function createBird() {
+            const bird = new THREE.Group();
+            const body = new THREE.Mesh(Assets.geos.box, Assets.mats.white);
+            body.scale.set(0.6, 0.2, 0.4);
+            bird.add(body);
+
+            const wingGeo = Assets.geos.box.clone(); // 날개는 중심점 이동 필요해서 클론 (가끔은 괜찮음)
+            wingGeo.translate(0.5, 0, 0); 
+            
+            const wingL = new THREE.Mesh(wingGeo, Assets.mats.white);
+            wingL.scale.set(0.8, 0.1, 0.4);
+            wingL.position.set(0.3, 0, 0);
+            
+            const wingR = new THREE.Mesh(wingGeo, Assets.mats.white);
+            wingR.scale.set(0.8, 0.1, 0.4);
+            wingR.rotation.y = Math.PI; 
+            wingR.position.set(-0.3, 0, 0); 
+
+            bird.add(wingL);
+            bird.add(wingR);
+
+            bird.userData = { wings: [wingL, wingR], speed: 0 };
+            return bird;
+        }
+
+        function spawnBird() {
+            const bird = createBird();
+            const fromLeft = Math.random() > 0.5;
+            const startX = fromLeft ? -100 : 100;
+            const yPos = 10 + Math.random() * 15; 
+            const zPos = -80 - Math.random() * 60; 
+            bird.position.set(startX, yPos, zPos);
+            bird.rotation.y = fromLeft ? 0 : Math.PI;
+            bird.scale.set(8, 8, 8); 
+            const speed = 25 + Math.random() * 15;
+            bird.userData.speed = fromLeft ? speed : -speed;
+            scene.add(bird);
+            birds.push(bird);
+        }
+
+        function createBone() {
+            const boneGroup = new THREE.Group();
+            const mat = Assets.mats.white; // 재사용
+
+            const shaft = new THREE.Mesh(Assets.geos.cylinder, mat);
+            shaft.scale.set(0.2, 1.2, 0.2);
+            shaft.rotation.z = Math.PI / 2; 
+            shaft.castShadow = true;
+            boneGroup.add(shaft);
+
+            const positions = [[-0.6, 0.2, 0], [-0.6, -0.2, 0], [0.6, 0.2, 0], [0.6, -0.2, 0]];
+            positions.forEach(pos => {
+                const knob = new THREE.Mesh(Assets.geos.sphere, mat);
+                knob.scale.set(0.3, 0.3, 0.3);
+                knob.position.set(...pos);
+                knob.castShadow = true;
+                boneGroup.add(knob);
+            });
+            boneGroup.rotation.x = Math.PI / 4; 
+            return boneGroup;
+        }
+
+        function createBubbleTexture(isHappy = false) {
+            const size = 64;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+
+            const p = (x, y, color) => { ctx.fillStyle = color; ctx.fillRect(x, y, 1, 1); };
+            const r = (x, y, w, h, color) => { ctx.fillStyle = color; ctx.fillRect(x, y, w, h); };
+
+            const bx = 14, by = 12, bw = 36, bh = 24;
+            r(bx+2, by, bw-4, bh, '#000'); r(bx, by+2, bw, bh-4, '#000');
+            r(bx+2, by+1, bw-4, bh-2, '#fff'); r(bx+1, by+2, bw-2, bh-4, '#fff');
+
+            p(bx+10, by+bh, '#000'); p(bx+11, by+bh, '#000');
+            p(bx+10, by+bh+1, '#000'); p(bx+9, by+bh+1, '#000');
+            p(bx+9, by+bh+2, '#000'); p(bx+8, by+bh+2, '#000');
+            p(bx+8, by+bh+3, '#000');
+            p(bx+11, by+bh-1, '#fff'); p(bx+10, by+bh-1, '#fff');
+            p(bx+11, by+bh, '#fff'); p(bx+10, by+bh, '#fff'); p(bx+9, by+bh+1, '#fff');
+
+            const dx = 32, dy = 24; 
+            r(dx-6, dy-4, 3, 4, '#8D6E63'); 
+            r(dx+4, dy-4, 3, 4, '#8D6E63'); 
+            r(dx-4, dy-2, 9, 8, '#FFCC80'); 
+            r(dx-5, dy, 1, 4, '#FFCC80'); 
+            r(dx+5, dy, 1, 4, '#FFCC80');
+
+            if (!isHappy) {
+                r(dx-2, dy+1, 1, 1, '#000'); r(dx+2, dy+1, 1, 1, '#000');
+                r(dx, dy+3, 1, 1, '#333');
+                p(dx-1, dy+4, '#000'); p(dx, dy+5, '#000'); p(dx+1, dy+4, '#000');
+            } else {
+                p(dx-3, dy+1, '#000'); p(dx-2, dy, '#000'); p(dx-1, dy+1, '#000');
+                p(dx+1, dy+1, '#000'); p(dx+2, dy, '#000'); p(dx+3, dy+1, '#000');
+                r(dx, dy+3, 1, 1, '#333');
+                r(dx-2, dy+4, 5, 3, '#000'); r(dx-1, dy+5, 3, 2, '#EF5350'); 
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.magFilter = THREE.NearestFilter;
+            texture.minFilter = THREE.NearestFilter;
+            return texture;
+        }
+
+        function createMango() {
+            mango = new THREE.Group();
+            
+            // 재질 재사용
+            const mO = Assets.mats.orange; const mW = Assets.mats.white; const mK = Assets.mats.black;
+            const box = Assets.geos.box; const cone = Assets.geos.cone;
+
+            const body = new THREE.Mesh(box, mO); body.scale.set(1, 1, 1.8); body.position.y = 1; body.castShadow = true; mango.add(body);
+            const head = new THREE.Mesh(box, mO); head.scale.set(1.2, 1.2, 1.2); head.position.set(0, 1.8, 0.8); head.castShadow = true; mango.add(head);
+            const snout = new THREE.Mesh(box, mW); snout.scale.set(0.6, 0.5, 0.4); snout.position.set(0, 1.6, 1.5); mango.add(snout);
+            const nose = new THREE.Mesh(box, mK); nose.scale.set(0.2, 0.2, 0.2); nose.position.set(0, 1.75, 1.7); mango.add(nose);
+
+            const earL = new THREE.Mesh(cone, mO); earL.scale.set(0.2, 0.6, 0.2); earL.position.set(0.4, 2.4, 0.8); earL.rotation.set(-0.2, 0, -0.2); mango.add(earL);
+            const earR = new THREE.Mesh(cone, mO); earR.scale.set(0.2, 0.6, 0.2); earR.position.set(-0.4, 2.4, 0.8); earR.rotation.set(-0.2, 0, 0.2); mango.add(earR);
+
+            const fl = new THREE.Mesh(box, mW); fl.scale.set(0.3, 0.8, 0.3); fl.position.set(0.3, 0.4, 0.7); mango.add(fl);
+            const fr = new THREE.Mesh(box, mW); fr.scale.set(0.3, 0.8, 0.3); fr.position.set(-0.3, 0.4, 0.7); mango.add(fr);
+            const bl = new THREE.Mesh(box, mW); bl.scale.set(0.3, 0.8, 0.3); bl.position.set(0.3, 0.4, -0.7); mango.add(bl);
+            const br = new THREE.Mesh(box, mW); br.scale.set(0.3, 0.8, 0.3); br.position.set(-0.3, 0.4, -0.7); mango.add(br);
+
+            const tail = new THREE.Mesh(box, mW); tail.scale.set(0.2, 0.2, 0.8); tail.position.set(0, 1.2, -1.0); tail.rotation.x = 0.5; mango.add(tail);
+
+            const bubbleMat = new THREE.SpriteMaterial({ map: Assets.textures.bubbleNormal, transparent: true, opacity: 0 });
+            const bubble = new THREE.Sprite(bubbleMat);
+            bubble.position.set(-1.2, 3.5, 0); 
+            bubble.scale.set(-2, 2, 1);
+            bubble.visible = false;
+            mango.add(bubble);
+
+            mango.userData = { 
+                legs: [fl, fr, bl, br], 
+                tail: tail,
+                bubble: bubble,        
+                bubbleTimer: 0
+            };
+            mango.rotation.y = Math.PI;
+            scene.add(mango);
+        }
+
+        function showBubble(bubble) {
+            bubble.visible = true;
+            bubble.material.opacity = 1;
+            bubble.position.y = 3.5; 
+            mango.userData.bubbleTimer = 1.2;
+            
+            if (combo >= 2) {
+                bubble.material.map = Assets.textures.bubbleHappy;
+                bubble.scale.set(-2.5, 2.5, 1); 
+            } else {
+                bubble.material.map = Assets.textures.bubbleNormal;
+                bubble.scale.set(-2, 2, 1);
+            }
+        }
+
+        function spawnObstacle() {
+            const laneIndex = Math.floor(Math.random() * 3);
+            const laneX = config.lanes[laneIndex];
+
+            // [최적화] 캔버스 텍스처를 매번 생성하지 않고 하나를 공유하거나 간단히 색상 머티리얼 사용
+            // 여기서는 성능을 위해 단순 박스로 변경 (또는 텍스처를 preloadAssets에 넣어야 함)
+            // 간단하게 나무 상자 색상 박스로 처리
+            const obstacle = new THREE.Mesh(Assets.geos.box, Assets.mats.brown);
+            obstacle.scale.set(2, 2, 2);
+            
+            obstacle.position.set(laneX, 1, -80);
+            obstacle.castShadow = true; obstacle.receiveShadow = true;
+            obstacle.userData = { box: new THREE.Box3(), passed: false, lane: laneIndex }; 
+            scene.add(obstacle);
+            obstacles.push(obstacle);
+        }
+
+        function spawnItem() {
+            const laneIndex = Math.floor(Math.random() * 3);
+            const laneX = config.lanes[laneIndex];
+            const lastObs = obstacles[obstacles.length - 1];
+            if (lastObs && lastObs.userData.lane === laneIndex && lastObs.position.z < -70) {
+                return;
+            }
+            const bone = createBone();
+            bone.position.set(laneX, 1, -80); 
+            bone.userData = { box: new THREE.Box3(), active: true, rotationSpeed: Math.random() * 2 + 1 };
+            scene.add(bone);
+            items.push(bone);
+        }
+
+        function spawnScenery() {
+            const isLeft = Math.random() > 0.5;
+            const xPos = isLeft ? -Math.random() * 20 - 8 : Math.random() * 20 + 8;
+            let item;
+            const rand = Math.random();
+            if (rand < 0.15) { 
+                item = createRock(); 
+                if(item.geometry && item.geometry.type === 'DodecahedronGeometry') item.position.y = 0.5; 
+                item.scale.multiplyScalar(1 + Math.random() * 0.5); 
+            } else if (rand < 0.50) { 
+                item = createTree(); 
+                item.rotation.y = Math.random() * Math.PI; 
+                item.scale.multiplyScalar(0.8 + Math.random() * 0.4); 
+            } else if (rand < 0.85) { 
+                item = new THREE.Group(); 
+                const flowerCount = 3 + Math.floor(Math.random() * 3); 
+                for(let k=0; k < flowerCount; k++) { 
+                    const flower = createFlower(); 
+                    flower.position.set((Math.random() - 0.5) * 3, 0, (Math.random() - 0.5) * 3); 
+                    flower.rotation.x = (Math.random() - 0.5) * 0.3; 
+                    flower.rotation.z = (Math.random() - 0.5) * 0.3; 
+                    flower.rotation.y = Math.random() * Math.PI; 
+                    item.add(flower); 
+                } 
+            } else { 
+                item = createZooAnimal(); 
+                const lookAtRoad = isLeft ? -Math.PI / 4 : Math.PI / 4; 
+                item.rotation.y = lookAtRoad + (Math.random() - 0.5); 
+            }
+            item.position.set(xPos, 0, -90); scene.add(item); scenery.push(item);
+        }
+
+        function updateDayNightCycle(delta) {
+            cycleTimer += delta;
+            const cycle = (cycleTimer % config.dayDuration) / config.dayDuration;
+            
+            // 색상 객체 생성 최소화 (미리 정의된 색상 보간)
+            const cDay = new THREE.Color(0x87CEEB); 
+            const cSun = new THREE.Color(0xFD5E53); 
+            const cNight = new THREE.Color(0x0B1026); 
+            const cRise = new THREE.Color(0xFFD700); 
+
+            let targetColor; let sunIntensity = 1; let starOpacity = 0;
+            if (cycle < 0.25) { const t = cycle / 0.25; targetColor = cDay.lerp(cSun, t); sunIntensity = 1.0 - t * 0.4; starOpacity = 0; } 
+            else if (cycle < 0.5) { const t = (cycle - 0.25) / 0.25; targetColor = cSun.lerp(cNight, t); sunIntensity = 0.6 - t * 0.4; starOpacity = t; } 
+            else if (cycle < 0.75) { const t = (cycle - 0.5) / 0.25; targetColor = cNight.lerp(cRise, t); sunIntensity = 0.2 + t * 0.4; starOpacity = 1.0 - t; } 
+            else { const t = (cycle - 0.75) / 0.25; targetColor = cRise.lerp(cDay, t); sunIntensity = 0.6 + t * 0.4; starOpacity = 0; }
+            
+            scene.background.copy(targetColor); scene.fog.color.copy(targetColor);
+            dirLight.intensity = sunIntensity; ambientLight.intensity = sunIntensity * 0.6; 
+            if (stars && stars.material.uniforms) stars.material.uniforms.uOpacity.value = starOpacity;
+        }
+
+        function updateCurve(delta) {
+            curveTimer += delta;
+            const curveAmount = Math.sin(curveTimer * 0.3) * 5.0; 
+            bendUniforms.uCurve.value.x = curveAmount;
+        }
+
+        function jump() {
+            if (!isJumping) { isJumping = true; jumpVelocity = config.jumpStrength; }
+        }
+
+        function startGame() {
+            startScreen.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+            gameActive = true; score = 0; speed = config.baseSpeed; currentLane = 1; targetX = config.lanes[currentLane];
+            mango.position.x = targetX; mango.position.y = 1; isJumping = false; jumpVelocity = 0;
+            scoreEl.innerText = '0'; speedValEl.innerText = Math.floor(speed); comboEl.style.opacity = 0;
+            obstacles.forEach(ob => scene.remove(ob)); obstacles = [];
+            items.forEach(it => scene.remove(it)); items = []; 
+            scenery.forEach(item => scene.remove(item)); scenery = [];
+            birds.forEach(b => scene.remove(b)); birds = []; 
+            lastTime = performance.now() * 0.001; spawnTimer = 0; sceneryTimer = 0; itemSpawnTimer = 0; birdSpawnTimer = 3.0;
+            cycleTimer = 0; curveTimer = 0; bendUniforms.uCurve.value.x = 0; combo = 0; comboTimer = 0;
+            for(let i=0; i<10; i++) { const item = createTree(); item.position.set(Math.random() > 0.5 ? -10 : 10, 0, -i * 10 - 10); scene.add(item); scenery.push(item); }
+        }
+
+        function resetGame() { startGame(); }
+        function gameOver() { gameActive = false; finalScoreEl.innerText = Math.floor(score); gameOverScreen.classList.remove('hidden'); }
+        function addScore(points) { score += points; scoreEl.innerText = score; scoreBoard.classList.add('score-bonus'); setTimeout(() => { scoreBoard.classList.remove('score-bonus'); }, 200); }
+        function handleInput(direction) { if (!gameActive) return; if (direction === 'left' && currentLane > 0) currentLane--; else if (direction === 'right' && currentLane < 2) currentLane++; targetX = config.lanes[currentLane]; }
+        function handleKeyDown(e) { if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') handleInput('left'); else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') handleInput('right'); else if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') jump(); }
+        function handleSwipe(touchEndX, touchEndY) { const touchDiffX = touchStartX - touchEndX; const touchDiffY = touchStartY - touchEndY; if (touchDiffY > 50 && Math.abs(touchDiffY) > Math.abs(touchDiffX)) { jump(); } else if (Math.abs(touchDiffX) > 30) { if (touchDiffX > 0) handleInput('left'); else handleInput('right'); } }
+        function onWindowResize() { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }
+
+        function update(delta, time) {
+            if (!gameActive) return;
+            if (delta > 0.1) delta = 0.1;
+            updateDayNightCycle(delta); updateCurve(delta); 
+            if (stars && stars.material.uniforms) stars.material.uniforms.uTime.value = time;
+            const moveSpeed = 10 * delta;
+            const xDiff = targetX - mango.position.x;
+            mango.position.x += xDiff * moveSpeed;
+            speedValEl.innerText = Math.floor(speed);
+            
+            if (comboTimer > 0) {
+                comboTimer -= delta;
+                if (comboTimer <= 0) { combo = 0; comboEl.style.opacity = 0; }
+            }
+
+            if (isJumping) {
+                jumpVelocity += config.gravity * delta;
+                mango.position.y += jumpVelocity * delta;
+                if (mango.position.y <= 1) { mango.position.y = 1; isJumping = false; jumpVelocity = 0; }
+            }
+            const runFreq = time * (8 + speed * 0.1); 
+            const tilt = xDiff * 0.15; const turn = xDiff * 0.1;  
+            if (!isJumping) { mango.position.y = 1 + Math.abs(Math.sin(runFreq)) * 0.06; mango.rotation.z = (Math.sin(runFreq) * 0.02) - tilt; } else { mango.rotation.z = -tilt; }
+            mango.rotation.y = Math.PI - turn; 
+            const legs = mango.userData.legs;
+            if (!isJumping) {
+                legs[0].rotation.x = Math.sin(runFreq) * 0.8; legs[1].rotation.x = Math.sin(runFreq + Math.PI) * 0.8; legs[2].rotation.x = Math.sin(runFreq + Math.PI) * 0.8; legs[3].rotation.x = Math.sin(runFreq) * 0.8; legs.forEach(leg => leg.rotation.z = 0);
+            } else {
+                const jumpHeight = Math.max(0, mango.position.y - 1);
+                let legAngle = Math.min(jumpHeight * 0.5, 0.8); 
+                legs[0].rotation.z = legAngle; legs[1].rotation.z = -legAngle; legs[2].rotation.z = legAngle; legs[3].rotation.z = -legAngle; legs.forEach(leg => leg.rotation.x = 0);
+            }
+            mango.userData.tail.rotation.y = Math.sin(time * 10) * 0.3;
+            if (mango.userData.bubbleTimer > 0) {
+                mango.userData.bubbleTimer -= delta;
+                mango.userData.bubble.position.y += delta * 0.5;
+                if (mango.userData.bubbleTimer < 0.5) mango.userData.bubble.material.opacity = mango.userData.bubbleTimer * 2;
+                if (mango.userData.bubbleTimer <= 0) {
+                    mango.userData.bubble.visible = false;
+                    mango.userData.bubble.scale.set(-2, 2, 1);
+                } else {
+                    if (combo >= 2) {
+                        const s = 2.5 + Math.sin(time * 15) * 0.2; 
+                        mango.userData.bubble.scale.set(-s, s, 1);
+                    }
+                }
+            }
+            if (roadMesh.userData.texture) roadMesh.userData.texture.offset.y -= speed * 0.002 * delta * 60;
+            spawnTimer += delta;
+            let currentSpawnRate = config.obstacleSpawnRate - (speed - config.baseSpeed) * 0.03;
+            if (currentSpawnRate < 0.6) currentSpawnRate = 0.6; 
+            if (spawnTimer > currentSpawnRate) { spawnObstacle(); spawnTimer = 0; }
+            const playerBox = new THREE.Box3();
+            mango.traverse((child) => { if (child.isMesh) playerBox.expandByObject(child); });
+            playerBox.expandByScalar(-0.6); playerBox.min.y = 0; playerBox.max.y = 2.5;
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                const obs = obstacles[i];
+                obs.position.z += speed * delta;
+                obs.rotation.x = Math.sin(time * 5 + i) * 0.1;
+                if (obs.position.z > 2 && !obs.userData.passed) { obs.userData.passed = true; addScore(1); if (speed < config.maxSpeed) speed += 0.5; }
+                if (!obs.userData.passed) {
+                    obs.userData.box.setFromObject(obs); obs.userData.box.expandByScalar(-0.3);
+                    if (Math.abs(obs.position.z - mango.position.z) < 2.0) { if (playerBox.intersectsBox(obs.userData.box)) gameOver(); }
+                }
+                if (obs.position.z > 15) { scene.remove(obs); obstacles.splice(i, 1); }
+            }
+            itemSpawnTimer += delta;
+            if (itemSpawnTimer > config.itemSpawnRate) { spawnItem(); itemSpawnTimer = 0; }
+            for (let i = items.length - 1; i >= 0; i--) {
+                const item = items[i];
+                item.position.z += speed * delta;
+                item.rotation.y += delta * item.userData.rotationSpeed; item.rotation.z = Math.sin(time * 3) * 0.2; 
+                if (item.userData.active) {
+                    item.userData.box.setFromObject(item);
+                    if (playerBox.intersectsBox(item.userData.box)) { 
+                        item.userData.active = false; 
+                        addScore(5); 
+                        combo++; comboTimer = config.comboResetTime; comboEl.innerText = combo + " COMBO!"; comboEl.style.opacity = 1;
+                        showBubble(mango.userData.bubble); 
+                        scene.remove(item); items.splice(i, 1); continue; 
+                    }
+                }
+                if (item.position.z > 15) { scene.remove(item); items.splice(i, 1); }
+            }
+            sceneryTimer += delta;
+            if (sceneryTimer > config.scenerySpawnRate) { spawnScenery(); sceneryTimer = 0; }
+            for (let i = scenery.length - 1; i >= 0; i--) {
+                const item = scenery[i];
+                item.position.z += speed * delta; 
+                if (item.position.z > 15) { scene.remove(item); scenery.splice(i, 1); }
+            }
+            birdSpawnTimer += delta;
+            if (birdSpawnTimer > 3.0) { if (Math.random() > 0.5) spawnBird(); birdSpawnTimer = 0; }
+            for (let i = birds.length - 1; i >= 0; i--) {
+                const b = birds[i];
+                b.position.x += b.userData.speed * delta;
+                const flapSpeed = 15; const angle = Math.sin(time * flapSpeed) * 0.5;
+                b.userData.wings[0].rotation.z = -angle; b.userData.wings[1].rotation.z = angle;  
+                if (Math.abs(b.position.x) > 120) { scene.remove(b); birds.splice(i, 1); }
+            }
+        }
+
+        function animate(time) {
+            requestAnimationFrame(animate);
+            const now = time * 0.001;
+            if (lastTime === 0) lastTime = now;
+            const delta = now - lastTime;
+            lastTime = now;
+            const canvas = renderer.domElement;
+            if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) { onWindowResize(); }
+            if (gameActive) { update(delta, now); }
+            renderer.render(scene, camera);
+        }
+
+        init();
+    </script>
+</body>
+</html>
